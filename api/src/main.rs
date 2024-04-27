@@ -1,4 +1,4 @@
-use models::Game;
+use model::Game;
 
 fn main() {
     let game: Game = Game::new();
