@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "api",
     "models",
 ]
 resolver = "2"
