@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 model = { path = "../model" }
+axum = "0.7.5"
+tokio = { version = "1.0", features = ["full"] }
