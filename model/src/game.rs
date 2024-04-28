@@ -39,4 +39,15 @@ impl Game {
             rounds: vec![],
         }
     }
+
+    pub fn add_player(&mut self) -> Result<usize, &'static str> {
+        // TODO: possibly implement shuffling players
+        match self.players.len() {
+            0..=3 => {
+                self.players.push(Player { id: 0 });
+                Ok(self.players.len())
+            }
+            _ => Err("table already full!"),
+        }
+    }
 }
