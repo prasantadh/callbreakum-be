@@ -26,7 +26,7 @@ struct Round {
 
 #[derive(Debug)]
 pub struct Game {
-    id: u8,
+    pub id: u8,
     players: Vec<Player>,
     rounds: Vec<Round>,
 }

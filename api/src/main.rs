@@ -1,4 +1,4 @@
-use axum::{response::Html, routing::get, Router};
+use axum::{response::Json, routing::get, Router};
 use model::Game;
 
 #[tokio::main]
@@ -6,7 +6,7 @@ async fn main() {
     let game: Game = Game::new();
 
     // build our application with a route
-    let app = Router::new().route("/", get(handler));
+    let app = Router::new().route("/new", get(newhandler));
 
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -16,6 +16,8 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn handler() -> Html<&'static str> {
-    Html("<h1> helloworld!<h1>")
+async fn newhandler() -> Json<u8> {
+    let game = Game::new();
+
+    Json(game.id)
 }
