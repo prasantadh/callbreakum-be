@@ -1,5 +1,13 @@
-use axum::{extract, response::Json, routing::get, routing::post, Router};
+use axum::{
+    extract::{self, State},
+    response::Json,
+    routing::post,
+    Router,
+};
+use bb8::Pool;
+use bb8_redis::RedisConnectionManager;
 use model::Game;
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -17,10 +25,22 @@ struct OutgoingMessage {
 
 #[tokio::main]
 async fn main() {
+    let manager = RedisConnectionManager::new("redis://localhost").unwrap();
+    let pool = bb8::Pool::builder().build(manager).await.unwrap();
+
+    {
+        // ping the database before starting
+        let mut conn = pool.get().await.unwrap();
+        conn.set::<&str, &str, ()>("foo", "bar").await.unwrap();
+        let result: String = conn.get("foo").await.unwrap();
+        assert_eq!(result, "bar");
+    }
+
     // build our application with a route
     let app = Router::new()
-        .route("/new", get(newhandler))
-        .route("/join", post(joinhandler));
+        .route("/new", post(newhandler))
+        .route("/join", post(joinhandler))
+        .with_state(pool);
 
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -29,13 +49,35 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn newhandler() -> Json<OutgoingMessage> {
-    let game = Game::new();
+type ConnectionPool = Pool<RedisConnectionManager>;
+async fn newhandler(
+    State(pool): State<ConnectionPool>,
+    extract::Json(payload): extract::Json<IncomingMessage>,
+) -> Json<OutgoingMessage> {
+    // check that the player is valid
+    // TODO need to check this is a correct user token
+    // for now simply enforce 6 char username that is not playing any other game
+    if payload.player.len() < 6 {
+        return Json(OutgoingMessage {
+            status: "Failure".to_string(),
+            data: "player name must be six characters".to_string(),
+        });
+    }
 
-    // likely need to insert a key on redis here with the game id
-    // turn this into a pubsub so the subsequent players can subscribe
-    // so in a way, make requests through the API
-    // but get updates through the websocket
+    // check that the requesting player has no active game
+    // TODO do I need to lock anything here?
+    let mut conn = pool.get().await.unwrap();
+    let gameid: Option<String> = conn.get(payload.player).await.unwrap();
+    if gameid != None {
+        return Json(OutgoingMessage {
+            status: "Failure".to_string(),
+            data: "player is in another game".to_string(),
+        });
+    }
+
+    let game = Game::new();
+    // just as an example of how to publish to a channel
+    // let _: () = conn.publish(game.id, "new short message").await.unwrap();
 
     Json(OutgoingMessage {
         status: "Success".to_string(),
