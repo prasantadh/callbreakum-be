@@ -1,22 +1,25 @@
-#[derive(Debug)]
+use serde::Serialize;
+use uuid::Uuid;
+
+#[derive(Debug, Serialize)]
 enum Card {}
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct Player {
     id: u8, // at some point this will have to be UUID
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct Hand {
     cards: Vec<Card>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct Trick {
     cards: Vec<Card>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct Round {
     hands: Vec<Hand>,   // indexed by player
     tricks: Vec<Trick>, // indexed by trick number
@@ -24,9 +27,10 @@ struct Round {
     breaks: Vec<u8>,    // indexed by player
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct Game {
-    pub id: u8,
+    #[serde(serialize_with = "uuid::serde::simple::serialize")]
+    pub id: Uuid,
     players: Vec<Player>,
     rounds: Vec<Round>,
 }
@@ -34,7 +38,7 @@ pub struct Game {
 impl Game {
     pub fn new() -> Game {
         Game {
-            id: 0,
+            id: Uuid::new_v4(),
             players: vec![],
             rounds: vec![],
         }

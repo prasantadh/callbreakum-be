@@ -67,7 +67,8 @@ async fn newhandler(
     // check that the requesting player has no active game
     // TODO do I need to lock anything here?
     let mut conn = pool.get().await.unwrap();
-    let gameid: Option<String> = conn.get(payload.player).await.unwrap();
+    // will likely need to lock on the player key here
+    let gameid: Option<String> = conn.get(payload.player.to_string()).await.unwrap();
     if gameid != None {
         return Json(OutgoingMessage {
             status: "Failure".to_string(),
@@ -76,9 +77,15 @@ async fn newhandler(
     }
 
     let game = Game::new();
-    // just as an example of how to publish to a channel
-    // let _: () = conn.publish(game.id, "new short message").await.unwrap();
+    let _: () = conn
+        .set(payload.player.to_string(), game.id.to_string())
+        .await
+        .unwrap();
 
+    let _: () = conn
+        .set(game.id.to_string(), serde_json::to_string(&game).unwrap())
+        .await
+        .unwrap();
     Json(OutgoingMessage {
         status: "Success".to_string(),
         data: game.id.to_string(),
