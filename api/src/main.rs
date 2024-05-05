@@ -102,18 +102,42 @@ async fn callhandler(
     // now do this inside a transaction
     // return 0 if no error, or another value if error
     let mut conn = client.get_connection().unwrap();
-    let game: String = conn.json_get(&payload.game, "$").unwrap();
-    let game: Vec<Game> = serde_json::from_str(game.as_str()).unwrap();
-    println!("game: {:?}", game[0]);
+    let v: u32 = redis::transaction(
+        &mut conn,
+        &[payload.player.to_string(), payload.game.to_string()],
+        |con, pipe| {
+            let game: String = con.json_get(&payload.game, "$").unwrap();
+            let mut game: Vec<Game> = serde_json::from_str(game.as_str()).unwrap();
+            let game = &mut game[0];
+            match game.call(&payload.player, payload.data.parse::<u8>().unwrap()) {
+                Ok(_) => {
+                    pipe.json_set(game.id.to_string(), "$", &game)
+                        .unwrap()
+                        .query::<()>(con)
+                        .unwrap();
+                    // here I need to set the json
+                    Ok(Some(0))
+                }
+                Err(_) => Ok(Some(1)),
+            }
+        },
+    )
+    .unwrap();
 
-    Json(OutgoingMessage {
-        status: "success".to_string(),
-        data: payload.data,
-    })
+    match v {
+        0 => Json(OutgoingMessage {
+            status: "success".to_string(),
+            data: payload.data,
+        }),
+        _ => Json(OutgoingMessage {
+            status: "failure".to_string(),
+            data: "there was an error processing your request".to_string(),
+        }),
+    }
 }
 
 async fn joinhandler(
-    extract::Json(payload): extract::Json<IncomingMessage>,
+    extract::Json(_payload): extract::Json<IncomingMessage>,
 ) -> Json<OutgoingMessage> {
     //TODO find a running game here instead of creating a new game
     // likely read game from redis
