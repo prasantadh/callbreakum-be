@@ -4,10 +4,8 @@ use axum::{
     routing::post,
     Router,
 };
-use bb8::Pool;
-use bb8_redis::RedisConnectionManager;
 use model::Game;
-use redis::AsyncCommands;
+use redis::{Commands, JsonCommands};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
@@ -25,14 +23,14 @@ struct OutgoingMessage {
 
 #[tokio::main]
 async fn main() {
-    let manager = RedisConnectionManager::new("redis://localhost").unwrap();
-    let pool = bb8::Pool::builder().build(manager).await.unwrap();
+    let client = redis::Client::open("redis://localhost").unwrap();
 
     {
+        // TODO create an index on the database to search player name
         // ping the database before starting
-        let mut conn = pool.get().await.unwrap();
-        conn.set::<&str, &str, ()>("foo", "bar").await.unwrap();
-        let result: String = conn.get("foo").await.unwrap();
+        let mut conn = client.get_connection().unwrap();
+        let _: () = conn.set("foo", "bar").unwrap();
+        let result: String = conn.get("foo").unwrap();
         assert_eq!(result, "bar");
     }
 
@@ -40,7 +38,8 @@ async fn main() {
     let app = Router::new()
         .route("/new", post(newhandler))
         .route("/join", post(joinhandler))
-        .with_state(pool);
+        .route("/call", post(callhandler))
+        .with_state(client);
 
     // run it
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -49,9 +48,8 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-type ConnectionPool = Pool<RedisConnectionManager>;
 async fn newhandler(
-    State(pool): State<ConnectionPool>,
+    State(client): State<redis::Client>,
     extract::Json(payload): extract::Json<IncomingMessage>,
 ) -> Json<OutgoingMessage> {
     // check that the player is valid
@@ -64,31 +62,53 @@ async fn newhandler(
         });
     }
 
-    // check that the requesting player has no active game
-    // TODO do I need to lock anything here?
-    let mut conn = pool.get().await.unwrap();
-    // will likely need to lock on the player key here
-    let gameid: Option<String> = conn.get(payload.player.to_string()).await.unwrap();
-    if gameid != None {
-        return Json(OutgoingMessage {
+    // within a transaction, see if the player has an active game
+    // if not then create a game, add current player then move on
+    let mut conn = client.get_connection().unwrap();
+    let mut game = Game::new();
+    let v: u32 = redis::transaction(&mut conn, &[payload.player.to_string()], |con, pipe| {
+        let count: Option<String> = con.get(&payload.player).unwrap();
+        return match count {
+            None => {
+                game.add_player(payload.player.to_string()).unwrap();
+                pipe.set(payload.player.to_string(), game.id.to_string())
+                    .json_set(game.id.to_string(), "$", &game)
+                    .unwrap()
+                    .query::<()>(con)
+                    .unwrap();
+                Ok(Some(0))
+            }
+            _ => Ok(Some(1)),
+        };
+    })
+    .unwrap();
+
+    match v {
+        0 => Json(OutgoingMessage {
+            status: "Success".to_string(),
+            data: game.id.to_string(),
+        }),
+        _ => Json(OutgoingMessage {
             status: "Failure".to_string(),
-            data: "player is in another game".to_string(),
-        });
+            data: "there was an error processing your request".to_string(),
+        }),
     }
+}
 
-    let game = Game::new();
-    let _: () = conn
-        .set(payload.player.to_string(), game.id.to_string())
-        .await
-        .unwrap();
+async fn callhandler(
+    State(client): State<redis::Client>,
+    extract::Json(payload): extract::Json<IncomingMessage>,
+) -> Json<OutgoingMessage> {
+    // now do this inside a transaction
+    // return 0 if no error, or another value if error
+    let mut conn = client.get_connection().unwrap();
+    let game: String = conn.json_get(&payload.game, "$").unwrap();
+    let game: Vec<Game> = serde_json::from_str(game.as_str()).unwrap();
+    println!("game: {:?}", game[0]);
 
-    let _: () = conn
-        .set(game.id.to_string(), serde_json::to_string(&game).unwrap())
-        .await
-        .unwrap();
     Json(OutgoingMessage {
-        status: "Success".to_string(),
-        data: game.id.to_string(),
+        status: "success".to_string(),
+        data: payload.data,
     })
 }
 
@@ -106,15 +126,18 @@ async fn joinhandler(
     // eventually, if someone doesn't specify a game but is a valid player,
     // assign them to any game that is looking for a player
 
-    let mut game = Game::new();
-    match game.add_player() {
-        Ok(v) => Json(OutgoingMessage {
-            status: "success".to_string(),
-            data: v.to_string(),
-        }),
-        Err(s) => Json(OutgoingMessage {
-            status: "failure".to_string(),
-            data: s.to_string(),
-        }),
-    }
+    // match game.add_player() {
+    //     Ok(v) => Json(OutgoingMessage {
+    //         status: "success".to_string(),
+    //         data: v.to_string(),
+    //     }),
+    //     Err(s) => Json(OutgoingMessage {
+    //         status: "failure".to_string(),
+    //         data: s.to_string(),
+    //     }),
+    // }
+    Json(OutgoingMessage {
+        status: "success".to_string(),
+        data: "under construction".to_string(),
+    })
 }
