@@ -7,6 +7,7 @@ use axum::{
 use model::Game;
 use redis::{Commands, JsonCommands};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 #[derive(Deserialize)]
 struct IncomingMessage {
@@ -53,7 +54,7 @@ async fn newhandler(
     extract::Json(payload): extract::Json<IncomingMessage>,
 ) -> Json<OutgoingMessage> {
     // check that the player is valid
-    // TODO need to check this is a correct user token
+    // TODO need to check this is a correct user session token
     // for now simply enforce 6 char username that is not playing any other game
     if payload.player.len() < 6 {
         return Json(OutgoingMessage {
@@ -62,36 +63,32 @@ async fn newhandler(
         });
     }
 
-    // within a transaction, see if the player has an active game
-    // if not then create a game, add current player then move on
     let mut conn = client.get_connection().unwrap();
-    let mut game = Game::new();
-    let v: u32 = redis::transaction(&mut conn, &[payload.player.to_string()], |con, pipe| {
-        let count: Option<String> = con.get(&payload.player).unwrap();
-        return match count {
-            None => {
-                game.add_player(payload.player.to_string()).unwrap();
-                pipe.set(payload.player.to_string(), game.id.to_string())
-                    .json_set(game.id.to_string(), "$", &game)
-                    .unwrap()
-                    .query::<()>(con)
-                    .unwrap();
-                Ok(Some(0))
-            }
-            _ => Ok(Some(1)),
-        };
-    })
-    .unwrap();
-
+    // TODO change all the unwraps into internal server error
+    redis::cmd("watch").arg(&payload.player).execute(&mut conn);
+    let v: Option<String> = conn.get(&payload.player).unwrap();
     match v {
-        0 => Json(OutgoingMessage {
-            status: "Success".to_string(),
-            data: game.id.to_string(),
-        }),
-        _ => Json(OutgoingMessage {
-            status: "Failure".to_string(),
+        Some(_) => Json(OutgoingMessage {
+            status: "failure".to_string(),
+            // TODO once we can verify valid user session tokens,
+            // return success with current game id instead of failure
             data: "there was an error processing your request".to_string(),
         }),
+        None => {
+            let mut game = Game::new();
+            game.add_player(&payload.player).unwrap();
+            redis::pipe()
+                .cmd("multi")
+                .json_set(game.id.to_string(), "$", &json!(game))
+                .unwrap()
+                .set(&payload.player, game.id.to_string())
+                .cmd("exec")
+                .execute(&mut conn);
+            Json(OutgoingMessage {
+                status: "success".to_string(),
+                data: game.id.to_string(),
+            })
+        }
     }
 }
 
