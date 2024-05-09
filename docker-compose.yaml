@@ -1,0 +1,16 @@
+version: "3.9"
+services:
+  cache:
+    image: redis/redis-stack-server:latest
+    restart: always
+    ports: 
+      - 6379:6379
+
+  api:
+    build: .
+    ports:
+      - 3000:3000
+    links:
+      - cache
+
+
