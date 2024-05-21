@@ -91,7 +91,7 @@ struct Round {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Game {
-    #[serde(serialize_with = "uuid::serde::simple::serialize")]
+    #[serde(serialize_with = "uuid::serde::urn::serialize")]
     pub id: Uuid,
     players: Vec<Player>,
     rounds: Vec<Round>,
@@ -106,11 +106,14 @@ impl Game {
         }
     }
 
-    pub fn add_player(&mut self, id: String) -> Result<usize, &'static str> {
+    pub fn add_player(&mut self, id: &String) -> Result<usize, &'static str> {
+        if self.players.iter().any(|p| &p.id == id) {
+            return Err("player is already in this game");
+        }
         // TODO: possibly implement shuffling players
         match self.players.len() {
             0..=3 => {
-                self.players.push(Player { id });
+                self.players.push(Player { id: id.to_owned() });
                 Ok(self.players.len())
             }
             _ => Err("table already full!"),
