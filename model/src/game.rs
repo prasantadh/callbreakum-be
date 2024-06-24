@@ -3,9 +3,9 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Rank {
-    Two,
+    Two = 2,
     Three,
     Four,
     Five,
@@ -17,6 +17,7 @@ pub enum Rank {
     Jack,
     Queen,
     King,
+    Ace,
 }
 
 impl Rank {
@@ -25,7 +26,7 @@ impl Rank {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
 pub enum Suit {
     Clubs,
     Diamonds,
@@ -82,11 +83,79 @@ struct Trick {
     cards: Vec<Card>,
 }
 
+impl Trick {
+    fn winner(&self) -> Option<usize> {
+        if self.cards.len() != 4 {
+            return None;
+        }
+        let spades_max: Option<usize> = self
+            .cards
+            .iter()
+            .enumerate()
+            .filter(|(i, c)| c.suit == Suit::Spades)
+            .max_by(|(_, a), (_, b)| a.rank.cmp(&b.rank))
+            .map(|(index, _)| index);
+        match spades_max {
+            Some(v) => Some(v),
+            None => Some({
+                let starter_suit = self.cards[0].suit;
+                self.cards
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, c)| c.suit == starter_suit)
+                    .max_by(|(_, a), (_, b)| a.rank.cmp(&b.rank))
+                    .unwrap()
+                    .0
+            }),
+        }
+    }
+
+    fn next(self) -> usize {
+        return self.cards.len();
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Round {
     hands: Vec<Hand>,   // indexed by player
     tricks: Vec<Trick>, // indexed by trick number
     calls: Vec<u8>,     // indexed by player
+}
+
+impl Round {
+    fn new() -> Round {
+        return Round {
+            hands: vec![],
+            tricks: vec![],
+            calls: vec![],
+        };
+    }
+
+    fn trick_winner(&self, index: usize) -> usize {
+        if index == 0 {
+            return self.tricks[index].winner().unwrap();
+        }
+
+        return (self.trick_winner(index - 1) + self.tricks[index].winner().unwrap()) % 4;
+    }
+
+    fn next(&self) -> usize {
+        if self.calls.len() != 4 {
+            return self.calls.len();
+        }
+        let current_trick_index = self.tricks.len() - 1;
+        let starter = self.trick_winner(current_trick_index - 1);
+        (starter + self.tricks.last().unwrap().cards.len()) % 4
+    }
+
+    fn playcard(&mut self, card: Card) {
+        let hand
+    }
+}
+
+pub enum State {
+    Calling,
+    Breaking,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -141,6 +210,26 @@ impl Game {
         };
     }
 
+    pub fn playcard(&mut self, player: &String, card: Card) -> Result<(), &'static str> {
+        let next = self.next();
+        if self.players[next].id != *player {
+            return Err("there was an error playing the card");
+        }
+
+        let mut round = self.rounds.last().unwrap();
+        match round.playcard(next, card) {
+            Err(_) => Err(""),
+            Ok(v) => Ok(()),
+        }
+    }
+
+    fn next(&self) -> usize {
+        let current_round_index = self.rounds.len() - 1;
+        let current_round = self.rounds.last().unwrap();
+        (current_round_index + current_round.next()) % 4
+    }
+
+    // Looks like this should be start game
     pub fn start_round(&mut self) -> Result<(), &'static str> {
         if self.rounds.len() == 5 {
             return Err("the game is already over!");
